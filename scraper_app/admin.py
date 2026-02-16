@@ -7,7 +7,7 @@ class ClientAdmin(admin.ModelAdmin):
 
 @admin.register(ScrapedData)
 class ScrapedDataAdmin(admin.ModelAdmin):
-    list_display = ('title', 'client', 'category', 'city', 'country', 'email', 'phone', 'created_at')
+    list_display = ('title', 'client', 'category', 'city', 'country', 'email', 'is_verified', 'phone', 'created_at')
     search_fields = ('title', 'category', 'city', 'country', 'link')
-    list_filter = ('client', 'country', 'created_at')
+    list_filter = ('client', 'country', 'is_verified', 'created_at')
 

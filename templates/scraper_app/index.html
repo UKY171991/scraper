@@ -107,6 +107,7 @@
                             <th>City</th>
                             <th>Country</th>
                             <th>Email</th>
+                            <th>Verified</th>
                             <th>Phone</th>
                             <th>Elfsight</th>
                             <th>Link</th>
@@ -153,7 +154,9 @@
                         document.getElementById('resultCount').textContent = data.count;
 
                         data.results.forEach((item, index) => {
-                            const badge = item.is_elfsight ? '<span class="badge bg-success">Yes</span>' : '<span class="badge bg-secondary">No</span>';
+                            const elfsightBadge = item.is_elfsight ? '<span class="badge bg-success">Yes</span>' : '<span class="badge bg-secondary">No</span>';
+                            const verifiedBadge = item.is_verified ? '<span class="badge bg-primary">Verified</span>' : '<span class="badge bg-warning text-dark">Not Verified</span>';
+
                             const row = `
                             <tr>
                                 <td>${index + 1}</td>
@@ -162,8 +165,9 @@
                                 <td>${item.city || '---'}</td>
                                 <td>${item.country}</td>
                                 <td>${item.email || '<span class="text-muted">N/A</span>'}</td>
+                                <td>${verifiedBadge}</td>
                                 <td>${item.phone || '<span class="text-muted">N/A</span>'}</td>
-                                <td>${badge}</td>
+                                <td>${elfsightBadge}</td>
                                 <td><a href="${item.link}" class="btn btn-sm btn-outline-primary" target="_blank">View Site</a></td>
                             </tr>
                         `;

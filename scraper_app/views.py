@@ -6,6 +6,8 @@ from .models import Client, ScrapedData
 from django.shortcuts import render
 from django.http import HttpResponse, JsonResponse
 import csv
+import re
+import concurrent.futures
 
 def index(request):
     clients = Client.objects.all()
@@ -14,9 +16,10 @@ def index(request):
 def scrape_data(request):
     if request.method == 'POST' and request.headers.get('x-requested-with') == 'XMLHttpRequest':
         client_id = request.POST.get('client')
-        category = request.POST.get('category')
-        city = request.POST.get('city', '')
-        country = request.POST.get('country')
+        category = request.POST.get('category', '').strip()
+        city = request.POST.get('city', '').strip()
+        country = request.POST.get('country', '').strip()
+        print(f"DEBUG: Scrape request received - Category: {category}, City: {city}, Country: {country}")
         
         client_name = "Unknown"
         if client_id:
@@ -31,24 +34,33 @@ def scrape_data(request):
         # Add client info to results and save to DB
         saved_count = 0
         for r in results:
+            # Prefer city from form if provided, otherwise use detected city
+            final_city = city if city else (r.get('city') or '')
+            final_country = country if country else (r.get('country') or '')
+            
             r['client'] = client_name
             r['category'] = category
-            r['city'] = city
-            r['country'] = country
+            r['city'] = final_city
+            r['country'] = final_country
             
             # Save to database
             try:
+                # Verified if email or phone is present
+                is_verified = True if (r.get('email') or r.get('phone')) else False
+                r['is_verified'] = is_verified
+                
                 ScrapedData.objects.create(
                     client=client if client_id else None,
                     category=category,
-                    city=city,
-                    country=country,
+                    city=final_city,
+                    country=final_country,
                     title=r.get('title', ''),
                     link=r.get('link', ''),
                     snippet=r.get('snippet', ''),
                     email=r.get('email', ''),
                     phone=r.get('phone', ''),
-                    is_elfsight=r.get('is_elfsight', False)
+                    is_elfsight=r.get('is_elfsight', False),
+                    is_verified=is_verified
                 )
                 saved_count += 1
             except Exception as e:
@@ -71,11 +83,24 @@ def perform_scraping(category, city, country):
     seen_links = set()
     
     def add_unique(new_list):
+        # Blacklist of aggregator/social/junk domains to ensure we get REAL business sites
+        blacklist = [
+            'reddit.com', 'tripadvisor.', 'indiatimes.com', 'justdial.com', 
+            'facebook.com', 'instagram.com', 'twitter.com', 'linkedin.com',
+            'youtube.com', 'pinterest.com', 'yelp.com', 'yellowpages.',
+            'magicpin.in', 'urbanpro.com', 'zumba.com', 'timesofindia.',
+            'wikipedia.org', 'quora.com', 'medium.com', 'glassdoor.',
+            'mapquest.com', 'maps.google.com', 'booking.com', 'expedia.',
+            'search.yahoo.com', 'search.brave.com'
+        ]
+        
         for item in new_list:
-            # Clean link
-            link = item['link']
+            link = item['link'].lower()
             if link.startswith('/'): continue
-            if 'search.yahoo.com' in link or 'search.brave.com' in link: continue
+            
+            # Skip blacklisted domains
+            if any(domain in link for domain in blacklist):
+                continue
             
             if link not in seen_links:
                 seen_links.add(link)
@@ -98,23 +123,23 @@ def perform_scraping(category, city, country):
     ]
 
     for name, engine_func in engines:
-        if len(all_results) >= 40: break # Good enough
+        if len(all_results) >= 40: break 
         
-        print(f"Trying {name}...")
+        print(f"Trying {name} for query: {query}")
         try:
-            headers = {
+            current_headers = {
                 "User-Agent": random.choice(user_agents),
                 "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
                 "Accept-Language": "en-US,en;q=0.5"
             }
-            results = engine_func(query, headers)
-            if results:
-                # Add city/country context to results
-                for r in results:
-                    r['city'] = city
-                    r['country'] = country
-                print(f"{name} found {len(results)} results.")
-                add_unique(results)
+            engine_results = engine_func(query, current_headers)
+            if engine_results:
+                # Force city/country into every dict immediately
+                for r in engine_results:
+                    r['city'] = (city or '').strip()
+                    r['country'] = (country or '').strip()
+                print(f"{name} found {len(engine_results)} results.")
+                add_unique(engine_results)
             else:
                 print(f"{name} returned zero.")
         except Exception as e:
@@ -123,12 +148,12 @@ def perform_scraping(category, city, country):
         time.sleep(random.uniform(1, 2))
 
     # Enrichment
-    results = all_results[:100]
-    if results:
-        print(f"Total unique found: {len(results)}. Extracting details...")
-        enrich_data(results)
+    final_results = all_results[:100]
+    if final_results:
+        print(f"Total unique found: {len(final_results)}. visiting sites to extract emails/phones/city...")
+        enrich_data(final_results)
     
-    return results
+    return final_results
 
 def scrape_brave(query, headers):
     results = []
@@ -155,7 +180,8 @@ def scrape_brave(query, headers):
                         'snippet': desc_tag.get_text(strip=True) if desc_tag else "",
                         'email': None,
                         'phone': None,
-                        'is_elfsight': False
+                        'is_elfsight': False,
+                        'is_verified': False
                     })
     except: pass
     return results
@@ -175,6 +201,15 @@ def scrape_yahoo(query, headers):
                     clean_title = raw_title.split(' - ')[0].split(' | ')[0]
                     
                     link = title_tag['href']
+                    # Yahoo often wraps links: r.search.yahoo.com/RK=2/RS=.../RV=2/RE=.../RU=REAL_URL/
+                    if 'RU=' in link:
+                        try:
+                            # Extract the REAL URL from the RU parameter
+                            parts = link.split('RU=')
+                            real_url = urllib.parse.unquote(parts[1].split('/')[0])
+                            link = real_url
+                        except: pass
+
                     snippet_tag = r.select_one('.compText') or r.select_one('.fc-falcon')
                     results.append({
                         'title': clean_title,
@@ -182,7 +217,8 @@ def scrape_yahoo(query, headers):
                         'snippet': snippet_tag.get_text(strip=True) if snippet_tag else "",
                         'email': None,
                         'phone': None,
-                        'is_elfsight': False
+                        'is_elfsight': False,
+                        'is_verified': False
                     })
     except: pass
     return results
@@ -202,7 +238,8 @@ def scrape_searxng(query, headers):
                     'snippet': r.get('content', ''),
                     'email': None,
                     'phone': None,
-                    'is_elfsight': False
+                    'is_elfsight': False,
+                    'is_verified': False
                 })
     except: pass
     return results
@@ -225,7 +262,8 @@ def scrape_mojeek(query, headers):
                         'snippet': snippet_tag.get_text(strip=True) if snippet_tag else "",
                         'email': None,
                         'phone': None,
-                        'is_elfsight': False
+                        'is_elfsight': False,
+                        'is_verified': False
                     })
     except: pass
     return results
@@ -248,8 +286,24 @@ def visit_and_extract(result):
             if any(t in text.lower() for t in ['elfsight.com', 'elfsight-app']):
                 result['is_elfsight'] = True
             
+            # Auto-detect City if missing
+            if not result.get('city'):
+                indian_cities = [
+                    'Mumbai', 'Delhi', 'Bangalore', 'Hyderabad', 'Ahmedabad', 'Chennai', 
+                    'Kolkata', 'Surat', 'Pune', 'Jaipur', 'Lucknow', 'Kanpur', 'Nagpur', 
+                    'Indore', 'Thane', 'Bhopal', 'Visakhapatnam', 'Pimpri-Chinchwad', 'Patna', 
+                    'Vadodara', 'Ghaziabad', 'Ludhiana', 'Agra', 'Nashik', 'Faridabad', 
+                    'Meerut', 'Rajkot', 'Kalyan-Dombivli', 'Vasai-Virar', 'Varanasi', 
+                    'Srinagar', 'Aurangabad', 'Dhanbad', 'Amritsar', 'Navi Mumbai', 'Allahabad', 
+                    'Ranchi', 'Howrah', 'Coimbatore', 'Jabalpur', 'Gwalior', 'Vijayawada', 
+                    'Jodhpur', 'Madurai', 'Raipur', 'Kota', 'Guwahati', 'Chandigarh', 'Solapur'
+                ]
+                for city_name in indian_cities:
+                    if city_name.lower() in text.lower():
+                        result['city'] = city_name
+                        break
+
             # Emails
-            import re
             emails = re.findall(r"[a-zA-Z0-9.\-_%+#]+@[a-zA-Z0-9.\-_%+#]+\.[a-zA-Z]{2,4}", text)
             if emails:
                 best = None
@@ -300,7 +354,7 @@ def download_csv(request):
     response = HttpResponse(content_type='text/csv')
     response['Content-Disposition'] = 'attachment; filename="scraped_data_results.csv"'
     writer = csv.writer(response)
-    writer.writerow(['Sr No.', 'Title', 'Link', 'Description', 'Category', 'City', 'Country', 'Email', 'Phone', 'Is Elfsight'])
+    writer.writerow(['Sr No.', 'Title', 'Link', 'Description', 'Category', 'City', 'Country', 'Email', 'Phone', 'Is Elfsight', 'Verified'])
     
     for i, r in enumerate(data, 1):
         writer.writerow([
@@ -313,7 +367,8 @@ def download_csv(request):
             r.get('country',''), 
             r.get('email',''), 
             r.get('phone',''), 
-            'Yes' if r.get('is_elfsight') else 'No'
+            'Yes' if r.get('is_elfsight') else 'No',
+            'Verified' if (r.get('email') or r.get('phone')) else 'Not Verified'
         ])
     return response
 
@@ -326,7 +381,7 @@ def download_client_csv(request, client_id):
         response['Content-Disposition'] = f'attachment; filename="scraped_data_{client.name.replace(" ", "_")}.csv"'
         
         writer = csv.writer(response)
-        writer.writerow(['Sr No.', 'Title', 'Link', 'Description', 'Category', 'City', 'Country', 'Email', 'Phone', 'Is Elfsight'])
+        writer.writerow(['Sr No.', 'Title', 'Link', 'Description', 'Category', 'City', 'Country', 'Email', 'Phone', 'Is Elfsight', 'Verified'])
         
         for i, row in enumerate(data, 1):
             writer.writerow([
@@ -339,7 +394,8 @@ def download_client_csv(request, client_id):
                 row.country,
                 row.email,
                 row.phone,
-                'Yes' if row.is_elfsight else 'No'
+                'Yes' if row.is_elfsight else 'No',
+                'Verified' if (row.email or row.phone) else 'Not Verified'
             ])
         return response
     except Client.DoesNotExist:
