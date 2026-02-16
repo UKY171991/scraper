@@ -5,65 +5,73 @@ import requests
 from bs4 import BeautifulSoup
 import urllib.parse
 
+import time
+from .models import Client
+
 def index(request):
-    return render(request, 'scraper_app/index.html')
+    clients = Client.objects.all()
+    return render(request, 'scraper_app/index.html', {'clients': clients})
 
 def scrape_data(request):
-    if request.method == 'POST':
+    if request.method == 'POST' and request.headers.get('x-requested-with') == 'XMLHttpRequest':
+        client_id = request.POST.get('client')
         category = request.POST.get('category')
-        city = request.POST.get('city')
+        city = request.POST.get('city', '')
         country = request.POST.get('country')
         
+        client_name = "Unknown"
+        if client_id:
+             try:
+                 client = Client.objects.get(id=client_id)
+                 client_name = client.name
+             except Client.DoesNotExist:
+                 pass
+
         results = perform_scraping(category, city, country)
         
+        # Add client info to results
+        for r in results:
+            r['client'] = client_name
+
         # Store results in session for download
         request.session['scraped_data'] = results
         
-        return render(request, 'scraper_app/results.html', {'results': results, 'category': category, 'city': city, 'country': country})
-    return render(request, 'scraper_app/index.html')
+        return JsonResponse({'status': 'success', 'results': results, 'count': len(results)})
+    return JsonResponse({'status': 'error', 'message': 'Invalid request'})
+
+from duckduckgo_search import DDGS
 
 def perform_scraping(category, city, country):
-    query = f"{category} in {city} {country}"
-    url = f"https://duckduckgo.com/html/?q={urllib.parse.quote(query)}"
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9",
-        "Accept-Language": "en-US,en;q=0.9",
-    }
+    location_part = f" in {city}" if city else ""
+    query = f"{category}{location_part} {country}"
     
-    try:  
-        print(f"Scraping URL: {url}")
-        response = requests.get(url, headers=headers)
-        response.raise_for_status()
-        soup = BeautifulSoup(response.text, 'html.parser')
-
-        results = []
-        # DuckDuckGo HTML structure (may vary, try generic fallback if empty)
-        for result in soup.select('.result'):
-            title_tag = result.select_one('.result__a')
-            if title_tag:
-                title = title_tag.get_text(strip=True)
-                link = title_tag['href']
-                snippet_tag = result.select_one('.result__snippet')
-                snippet = snippet_tag.get_text(strip=True) if snippet_tag else "No description"
-                
+    print(f"Scraping query: {query}")
+    results = []
+    
+    try:
+        with DDGS() as ddgs:
+            # increasing max_results to ensure we get enough
+            # DDGS .text() returns an iterator
+            ddgs_gen = ddgs.text(query, max_results=150)
+            
+            for r in ddgs_gen:
                 results.append({
-                    'title': title,
-                    'link': link,
-                    'snippet': snippet,
+                    'title': r.get('title'),
+                    'link': r.get('href'),
+                    'snippet': r.get('body'),
                     'category': category,
                     'city': city,
                     'country': country
                 })
-        
-        if not results:
-             print("No results found with default selectors. Dumping HTML for debugging (truncated).")
-             print(soup.prettify()[:500])
-
+                
+                if len(results) >= 150:
+                    break
+                    
         return results
     except Exception as e:
-        print(f"Error scraping: {e}")
+        print(f"Error scraping with DDGS: {e}")
         return []
+
 
 
 def download_csv(request):

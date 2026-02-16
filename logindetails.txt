@@ -1,0 +1,5 @@
+
+Admin Panel Login Details:
+URL: /admin/
+Username: admin
+Password: admin123
