@@ -16,6 +16,7 @@ class ScrapedData(models.Model):
     link = models.URLField(max_length=500)
     snippet = models.TextField(blank=True, null=True)
     email = models.CharField(max_length=255, blank=True, null=True)
+    phone = models.CharField(max_length=255, blank=True, null=True)
     is_elfsight = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
