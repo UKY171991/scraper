@@ -151,7 +151,11 @@
                     submitBtn.disabled = false;
 
                     if (data.status === 'success') {
-                        document.getElementById('resultCount').textContent = data.count;
+                        let msg = `Found ${data.count} new leads.`;
+                        if (data.skipped_duplicates > 0) {
+                            msg += ` (${data.skipped_duplicates} duplicates skipped)`;
+                        }
+                        document.getElementById('resultCount').textContent = msg;
 
                         data.results.forEach((item, index) => {
                             const elfsightBadge = item.is_elfsight ? '<span class="badge bg-success">Yes</span>' : '<span class="badge bg-secondary">No</span>';
@@ -162,11 +166,11 @@
                                 <td>${index + 1}</td>
                                 <td>${item.client}</td>
                                 <td>${item.title} <br><small class="text-muted">${item.snippet.substring(0, 100)}...</small></td>
-                                <td>${item.city || '---'}</td>
+                                <td>${item.city || ''}</td>
                                 <td>${item.country}</td>
-                                <td>${item.email || '<span class="text-muted">N/A</span>'}</td>
+                                <td>${item.email || ''}</td>
                                 <td>${verifiedBadge}</td>
-                                <td>${item.phone || '<span class="text-muted">N/A</span>'}</td>
+                                <td>${item.phone || ''}</td>
                                 <td>${elfsightBadge}</td>
                                 <td><a href="${item.link}" class="btn btn-sm btn-outline-primary" target="_blank">View Site</a></td>
                             </tr>

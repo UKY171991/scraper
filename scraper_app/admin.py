@@ -10,4 +10,5 @@ class ScrapedDataAdmin(admin.ModelAdmin):
     list_display = ('title', 'client', 'category', 'city', 'country', 'email', 'is_verified', 'phone', 'created_at')
     search_fields = ('title', 'category', 'city', 'country', 'link')
     list_filter = ('client', 'country', 'is_verified', 'created_at')
+    ordering = ('is_verified', '-created_at')
 
