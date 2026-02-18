@@ -79,6 +79,8 @@
                     </select>
                     <button class="btn btn-outline-success" type="button" id="downloadClientBtn">Download Client
                         CSV</button>
+                    <button class="btn btn-outline-primary" type="button" id="downloadVerifiedClientBtn">Download
+                        Verified CSV</button>
                 </div>
             </div>
         </div>
@@ -198,6 +200,15 @@
                 return;
             }
             window.location.href = `/download/${clientId}/`;
+        });
+
+        document.getElementById('downloadVerifiedClientBtn').addEventListener('click', function () {
+            const clientId = document.getElementById('clientDownloadSelect').value;
+            if (!clientId) {
+                alert('Please select a client first.');
+                return;
+            }
+            window.location.href = `/download-verified/${clientId}/`;
         });
     </script>
 </body>

@@ -581,6 +581,36 @@ def download_client_csv(request, client_id):
     except Client.DoesNotExist:
         return HttpResponse("Client not found", status=404)
 
+def download_verified_client_csv(request, client_id):
+    try:
+        client = Client.objects.get(id=client_id)
+        # Filter ONLY verified data
+        data = ScrapedData.objects.filter(client=client, is_verified=True).order_by('-created_at')
+        
+        response = HttpResponse(content_type='text/csv')
+        response['Content-Disposition'] = f'attachment; filename="verified_data_{client.name.replace(" ", "_")}.csv"'
+        
+        writer = csv.writer(response)
+        writer.writerow(['Sr No.', 'Title', 'Link', 'Description', 'Category', 'City', 'Country', 'Email', 'Phone', 'Is Elfsight', 'Verified'])
+        
+        for i, row in enumerate(data, 1):
+            writer.writerow([
+                i,
+                row.title, 
+                row.link, 
+                row.snippet, 
+                row.category, 
+                row.city, 
+                row.country,
+                row.email,
+                row.phone,
+                'Yes' if row.is_elfsight else 'No',
+                'Verified' # Since we filtered by is_verified=True
+            ])
+        return response
+    except Client.DoesNotExist:
+        return HttpResponse("Client not found", status=404)
+
 # Dummy removal
 def scrape_bing(q, h): return []
 def scrape_ask(q, h): return []
