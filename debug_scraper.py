@@ -1,102 +1,102 @@
 import requests
 from bs4 import BeautifulSoup
 import urllib.parse
+import time
 
-def test_all_engines():
-    category = "gym"
-    country = "India"
-    location_part = ""
-    query = f"{category}{location_part} {country} reviews business"
-    print(f"Testing scraping for: {query}")
+def test_scraping():
+    category = "Law Firm"
+    city = "Toronto"
+    country = "Canada"
+    
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8"
     }
     
-    # 7. Brave Search
-    print("\n--- Testing Brave Search ---")
-    try:
-        url = f"https://search.brave.com/search?q={urllib.parse.quote(query)}"
-        resp = requests.get(url, headers=headers, timeout=10)
-        print(f"Status: {resp.status_code}")
-        soup = BeautifulSoup(resp.text, 'html.parser')
-        results = soup.select('.snippet')
-        print(f"Brave found: {len(results)}")
-        if results:
-            title = results[0].select_one('.heading') or results[0].select_one('a')
-            print(f"Sample: {title.get_text(strip=True) if title else 'No title'}")
-    except Exception as e:
-        print(f"Brave Error: {e}")
+    # Test 1: Google Reviews ONLY
+    print("\n=== Test 1: Google Reviews ONLY ===")
+    query = f"{category} {city} {country} google reviews"
+    print(f"Query: {query}")
     
-    # 1. Yahoo
-    print("\n--- Testing Yahoo ---")
+    time.sleep(2)  # Wait before request
+    
     try:
-        url = f"https://search.yahoo.com/search?p={urllib.parse.quote(query)}"
+        url = f"https://html.duckduckgo.com/html/?q={urllib.parse.quote(query)}"
         resp = requests.get(url, headers=headers, timeout=10)
         print(f"Status: {resp.status_code}")
-        soup = BeautifulSoup(resp.text, 'html.parser')
-        results = soup.select('div.algo')
-        print(f"Yahoo found: {len(results)}")
-        if results:
-            print(f"Sample: {results[0].select_one('h3').get_text(strip=True)}")
-    except Exception as e:
-        print(f"Yahoo Error: {e}")
-
-    # 2. Bing
-    print("\n--- Testing Bing ---")
-    try:
-        url = f"https://www.bing.com/search?q={urllib.parse.quote(query)}"
-        resp = requests.get(url, headers=headers, timeout=10)
-        print(f"Status: {resp.status_code}")
-        soup = BeautifulSoup(resp.text, 'html.parser')
-        results = soup.select('li.b_algo')
-        print(f"Bing found: {len(results)}")
-        if results:
-            print(f"Sample: {results[0].select_one('h2').get_text(strip=True)}")
-    except Exception as e:
-        print(f"Bing Error: {e}")
-
-    # 3. DuckDuckGo HTML
-    print("\n--- Testing DDG HTML ---")
-    try:
-        url = "https://html.duckduckgo.com/html/"
-        resp = requests.post(url, data={'q': query}, headers=headers, timeout=10)
-        print(f"Status: {resp.status_code}")
-        soup = BeautifulSoup(resp.text, 'html.parser')
-        results = soup.select('.result')
-        print(f"DDG found: {len(results)}")
-        if results:
-            print(f"Sample: {results[0].select_one('.result__a').get_text(strip=True)}")
-    except Exception as e:
-        print(f"DDG Error: {e}")
         
-    # 4. Ask.com
-    print("\n--- Testing Ask.com ---")
+        if resp.status_code == 200:
+            soup = BeautifulSoup(resp.text, 'html.parser')
+            items = soup.select('.result')
+            print(f"Total results found: {len(items)}")
+            
+            filtered_count = 0
+            for i, r in enumerate(items[:10], 1):
+                title_tag = r.select_one('.result__title a') or r.select_one('.result__a')
+                snippet_tag = r.select_one('.result__snippet')
+                
+                if title_tag:
+                    title = title_tag.get_text(strip=True)
+                    link = title_tag.get('href', '')
+                    snippet = snippet_tag.get_text(strip=True) if snippet_tag else ""
+                    
+                    # Check for Google Reviews indicators
+                    is_google_maps = 'google.com/maps' in link.lower() or 'goo.gl/maps' in link.lower()
+                    has_review_keywords = any(keyword in title.lower() or keyword in snippet.lower() 
+                                             for keyword in ['review', 'rating', 'star', '★', 'google'])
+                    
+                    if is_google_maps or has_review_keywords:
+                        filtered_count += 1
+                        print(f"\n{filtered_count}. {title}")
+                        print(f"   Link: {link[:80]}...")
+                        if is_google_maps:
+                            print("   ✓ GOOGLE MAPS LINK")
+                        if has_review_keywords:
+                            print("   ✓ HAS REVIEW KEYWORDS")
+            
+            print(f"\nFiltered results with Google Reviews: {filtered_count}/{len(items)}")
+        else:
+            print(f"Rate limited or blocked. Try again in a few seconds.")
+            
+    except Exception as e:
+        print(f"Error: {e}")
+    
+    # Test 2: Elfsight Businesses
+    print("\n\n=== Test 2: Elfsight Businesses ===")
+    query = f"{category} {city} {country} elfsight"
+    print(f"Query: {query}")
+    
+    time.sleep(3)  # Wait before request
+    
     try:
-        url = f"https://www.ask.com/web?q={urllib.parse.quote(query)}"
+        url = f"https://html.duckduckgo.com/html/?q={urllib.parse.quote(query)}"
         resp = requests.get(url, headers=headers, timeout=10)
         print(f"Status: {resp.status_code}")
-        soup = BeautifulSoup(resp.text, 'html.parser')
-        results = soup.select('.PartialSearchResults-item')
-        print(f"Ask found: {len(results)}")
-        if results:
-            print(f"Sample: {results[0].select_one('a').get_text(strip=True)}")
+        
+        if resp.status_code == 200:
+            soup = BeautifulSoup(resp.text, 'html.parser')
+            items = soup.select('.result')
+            print(f"Found: {len(items)} results")
+            
+            for i, r in enumerate(items[:5], 1):
+                title_tag = r.select_one('.result__title a') or r.select_one('.result__a')
+                snippet_tag = r.select_one('.result__snippet')
+                
+                if title_tag:
+                    title = title_tag.get_text(strip=True)
+                    link = title_tag.get('href', '')
+                    snippet = snippet_tag.get_text(strip=True) if snippet_tag else ""
+                    
+                    has_elfsight = 'elfsight' in link.lower() or 'elfsight' in title.lower() or 'elfsight' in snippet.lower()
+                    
+                    print(f"\n{i}. {title}")
+                    print(f"   Link: {link[:80]}...")
+                    if has_elfsight:
+                        print("   ✓ ELFSIGHT DETECTED")
+        else:
+            print(f"Rate limited or blocked. Try again in a few seconds.")
     except Exception as e:
-        print(f"Ask Error: {e}")
-
-    # 6. Ecosia
-    print("\n--- Testing Ecosia ---")
-    try:
-        url = f"https://www.ecosia.org/search?q={urllib.parse.quote(query)}"
-        resp = requests.get(url, headers=headers, timeout=10)
-        print(f"Status: {resp.status_code}")
-        soup = BeautifulSoup(resp.text, 'html.parser')
-        results = soup.select('a.result-title')
-        print(f"Ecosia found: {len(results)}")
-        if results:
-            print(f"Sample: {results[0].get_text(strip=True)}")
-    except Exception as e:
-        print(f"Ecosia Error: {e}")
+        print(f"Error: {e}")
 
 if __name__ == "__main__":
-    test_all_engines()
+    test_scraping()

@@ -4,6 +4,7 @@ from . import views
 urlpatterns = [
     path('', views.index, name='index'),
     path('scrape/', views.scrape_data, name='scrape'),
+    path('progress/', views.get_scraping_progress, name='progress'),
     path('download/', views.download_csv, name='download'),
     path('download/<int:client_id>/', views.download_client_csv, name='download_client'),
     path('download-verified/<int:client_id>/', views.download_verified_client_csv, name='download_verified_client'),

@@ -50,18 +50,31 @@
                 <div class="form-text"><a href="/admin/scraper_app/client/add/" target="_blank">Add new client</a></div>
             </div>
             <div class="mb-3">
-                <label for="category" class="form-label">Category</label>
-                <input type="text" class="form-control" id="category" name="category" placeholder="e.g. Restaurants"
-                    required>
+                <label for="category" class="form-label">Category <span class="text-danger">*</span></label>
+                <input type="text" class="form-control" id="category" name="category" placeholder="e.g. Restaurants, Gyms, Lawyers" required>
+                <div class="form-text">You can enter multiple categories separated by commas</div>
             </div>
             <div class="mb-3">
                 <label for="city" class="form-label">City (Optional)</label>
-                <input type="text" class="form-control" id="city" name="city" placeholder="e.g. New York">
+                <input type="text" class="form-control" id="city" name="city" placeholder="e.g. New York, Toronto, London">
+                <div class="form-text">You can enter multiple cities separated by commas</div>
             </div>
             <div class="mb-3">
-                <label for="country" class="form-label">Country</label>
+                <label for="country" class="form-label">Country <span class="text-danger">*</span></label>
                 <input type="text" class="form-control" id="country" name="country" placeholder="e.g. USA" required>
             </div>
+            
+            <div class="mb-3">
+                <hr>
+                <h6 class="text-muted">OR Scrape from URL</h6>
+                <label for="url" class="form-label">Direct URL (Optional)</label>
+                <input type="url" class="form-control" id="url" name="url" placeholder="https://example.com">
+                <div class="form-text">
+                    Enter the actual business website URL to scrape contact information directly.
+                    <br><strong>Note:</strong> Search mode automatically filters out listing sites and finds real business URLs.
+                </div>
+            </div>
+            
             <button type="submit" class="btn btn-primary w-100">Scrape Data</button>
         </form>
 
@@ -90,8 +103,25 @@
                 <span class="visually-hidden">Loading...</span>
             </div>
             <p class="mt-2 fw-bold" id="loadingText">Auto-scraping in progress...</p>
-            <p class="text-muted small">We are trying multiple search engines (Yahoo, Ecosia, Bing) and extracting
-                emails. This takes 1-5 minutes depending on volume.</p>
+            <div id="processingDetails" class="alert alert-info mt-3" style="display: none;">
+                <h6 class="mb-2">Currently Processing:</h6>
+                <div><strong>Category:</strong> <span id="currentCategory">-</span></div>
+                <div><strong>City:</strong> <span id="currentCity">-</span></div>
+                <div><strong>Country:</strong> <span id="currentCountry">-</span></div>
+                <div class="mt-2"><strong>Progress:</strong> <span id="progressText">-</span></div>
+                <div class="mt-2"><strong>Status:</strong> <span id="statusText" class="text-primary">-</span></div>
+                <div class="mt-2"><strong>Time Elapsed:</strong> <span id="timerText">0:00</span></div>
+                <div class="mt-2">
+                    <strong>Saved to Database:</strong> <span id="savedCount" class="badge bg-success">0</span>
+                    <strong class="ms-3">Skipped:</strong> <span id="skippedCount" class="badge bg-warning text-dark">0</span>
+                </div>
+            </div>
+            <div id="skippedDetails" class="alert alert-warning mt-3" style="display: none;">
+                <h6 class="mb-2">Skipped Items:</h6>
+                <ul id="skippedList" class="small mb-0" style="max-height: 200px; overflow-y: auto;">
+                </ul>
+            </div>
+            <p class="text-muted small">Scraping data from Google Reviews and Elfsight sources. This may take 1-5 minutes depending on the number of categories and cities.</p>
         </div>
 
         <div id="resultsArea" class="mt-4" style="display: none;">
@@ -124,73 +154,222 @@
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
-        document.getElementById('scraperForm').addEventListener('submit', function (e) {
-            e.preventDefault();
-
-            const form = this;
-            const formData = new FormData(form);
-            const loading = document.getElementById('loading');
-            const resultsArea = document.getElementById('resultsArea');
-            const resultsTableBody = document.querySelector('#resultsTable tbody');
-            const submitBtn = form.querySelector('button[type="submit"]');
-
-            // UI Updates
-            loading.style.display = 'block';
-            resultsArea.style.display = 'none';
-            submitBtn.disabled = true;
-            resultsTableBody.innerHTML = '';
-
-            fetch("{% url 'scrape' %}", {
-                method: 'POST',
-                body: formData,
-                headers: {
-                    'X-Requested-With': 'XMLHttpRequest'
-                }
-            })
-                .then(response => response.json())
-                .then(data => {
-                    loading.style.display = 'none';
-                    submitBtn.disabled = false;
-
-                    if (data.status === 'success') {
-                        let msg = `Found ${data.count} new leads.`;
-                        if (data.skipped_duplicates > 0) {
-                            msg += ` (${data.skipped_duplicates} duplicates skipped)`;
+        // Wait for DOM to be fully loaded
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('DOM loaded, initializing form handler');
+            
+            // Get CSRF token from cookie
+            function getCookie(name) {
+                let cookieValue = null;
+                if (document.cookie && document.cookie !== '') {
+                    const cookies = document.cookie.split(';');
+                    for (let i = 0; i < cookies.length; i++) {
+                        const cookie = cookies[i].trim();
+                        if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                            cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                            break;
                         }
-                        document.getElementById('resultCount').textContent = msg;
-
-                        data.results.forEach((item, index) => {
-                            const elfsightBadge = item.is_elfsight ? '<span class="badge bg-success">Yes</span>' : '<span class="badge bg-secondary">No</span>';
-                            const verifiedBadge = item.is_verified ? '<span class="badge bg-primary">Verified</span>' : '<span class="badge bg-warning text-dark">Not Verified</span>';
-
-                            const row = `
-                            <tr>
-                                <td>${index + 1}</td>
-                                <td>${item.client}</td>
-                                <td>${item.title} <br><small class="text-muted">${item.snippet.substring(0, 100)}...</small></td>
-                                <td>${item.city || ''}</td>
-                                <td>${item.country}</td>
-                                <td>${item.email || ''}</td>
-                                <td>${verifiedBadge}</td>
-                                <td>${item.phone || ''}</td>
-                                <td>${elfsightBadge}</td>
-                                <td><a href="${item.link}" class="btn btn-sm btn-outline-primary" target="_blank">View Site</a></td>
-                            </tr>
-                        `;
-                            resultsTableBody.insertAdjacentHTML('beforeend', row);
-                        });
-
-                        resultsArea.style.display = 'block';
-                    } else {
-                        alert('Error: ' + (data.message || 'Unknown error occurred'));
                     }
+                }
+                return cookieValue;
+            }
+            
+            const csrftoken = getCookie('csrftoken');
+            console.log('CSRF token:', csrftoken ? 'Found' : 'Not found');
+            
+            const form = document.getElementById('scraperForm');
+            if (!form) {
+                console.error('Form not found!');
+                return;
+            }
+            
+            form.addEventListener('submit', function (e) {
+                e.preventDefault();
+                e.stopPropagation();
+                
+                console.log('Form submitted via AJAX');
+
+                const formData = new FormData(form);
+                const loading = document.getElementById('loading');
+                const resultsArea = document.getElementById('resultsArea');
+                const resultsTableBody = document.querySelector('#resultsTable tbody');
+                const submitBtn = form.querySelector('button[type="submit"]');
+                
+                // Add CSRF token to form data
+                formData.append('csrfmiddlewaretoken', csrftoken);
+                
+                // Validate: URL requires Category and Country to be filled
+                const url = formData.get('url');
+                const category = formData.get('category');
+                const country = formData.get('country');
+                const client = formData.get('client');
+                
+                if (!client) {
+                    alert('Please select a client.');
+                    return;
+                }
+                
+                if (url) {
+                    // URL scraping mode - require category and country
+                    if (!category || !country) {
+                        alert('When scraping from URL, please provide Category and Country for proper data organization.');
+                        return;
+                    }
+                } else {
+                    // Search mode - require category and country
+                    if (!category || !country) {
+                        alert('Please provide both Category and Country for search-based scraping.');
+                        return;
+                    }
+                }
+                
+                console.log('Validation passed. Sending request...');
+                console.log('Client:', client);
+                console.log('URL:', url);
+                console.log('Category:', category);
+                console.log('City:', formData.get('city'));
+                console.log('Country:', country);
+
+                // Show processing details
+                const processingDetails = document.getElementById('processingDetails');
+                const skippedDetails = document.getElementById('skippedDetails');
+                const categories = category.split(',').map(c => c.trim()).filter(c => c);
+                const cities = formData.get('city') ? formData.get('city').split(',').map(c => c.trim()).filter(c => c) : ['All cities'];
+                
+                document.getElementById('currentCategory').textContent = categories.join(', ');
+                document.getElementById('currentCity').textContent = cities.join(', ');
+                document.getElementById('currentCountry').textContent = country;
+                document.getElementById('progressText').textContent = `Processing ${categories.length} categor${categories.length > 1 ? 'ies' : 'y'} × ${cities.length} cit${cities.length > 1 ? 'ies' : 'y'} = ${categories.length * cities.length} combination${categories.length * cities.length > 1 ? 's' : ''}`;
+                processingDetails.style.display = 'block';
+                
+                // Reset counters
+                document.getElementById('savedCount').textContent = '0';
+                document.getElementById('skippedCount').textContent = '0';
+                document.getElementById('skippedList').innerHTML = '';
+                skippedDetails.style.display = 'none';
+                
+                // Start timer
+                const startTime = Date.now();
+                const timerInterval = setInterval(() => {
+                    const elapsed = Math.floor((Date.now() - startTime) / 1000);
+                    const minutes = Math.floor(elapsed / 60);
+                    const seconds = elapsed % 60;
+                    document.getElementById('timerText').textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+                }, 1000);
+                
+                // Start polling for progress updates
+                const progressInterval = setInterval(() => {
+                    fetch("{% url 'progress' %}", {
+                        method: 'GET',
+                        headers: {
+                            'X-Requested-With': 'XMLHttpRequest'
+                        },
+                        credentials: 'same-origin'
+                    })
+                    .then(response => response.json())
+                    .then(progress => {
+                        if (progress.current && progress.total) {
+                            document.getElementById('progressText').textContent = 
+                                `Processing ${progress.current}/${progress.total} combinations - ${progress.current_category} in ${progress.current_city}`;
+                            document.getElementById('savedCount').textContent = progress.saved || 0;
+                            document.getElementById('skippedCount').textContent = progress.skipped || 0;
+                            if (progress.status) {
+                                document.getElementById('statusText').textContent = progress.status;
+                            }
+                        }
+                    })
+                    .catch(err => console.log('Progress poll error:', err));
+                }, 1000); // Poll every second
+
+                // UI Updates
+                loading.style.display = 'block';
+                resultsArea.style.display = 'none';
+                submitBtn.disabled = true;
+                resultsTableBody.innerHTML = '';
+
+                fetch("{% url 'scrape' %}", {
+                    method: 'POST',
+                    body: formData,
+                    headers: {
+                        'X-Requested-With': 'XMLHttpRequest',
+                        'X-CSRFToken': csrftoken
+                    },
+                    credentials: 'same-origin'
                 })
-                .catch(error => {
-                    console.error('Error:', error);
-                    loading.style.display = 'none';
-                    submitBtn.disabled = false;
-                    alert('An error occurred while scraping.');
-                });
+                    .then(response => {
+                        console.log('Response received:', response.status);
+                        if (!response.ok) {
+                            throw new Error(`HTTP error! status: ${response.status}`);
+                        }
+                        return response.json();
+                    })
+                    .then(data => {
+                        console.log('Data received:', data);
+                        clearInterval(timerInterval);
+                        clearInterval(progressInterval);
+                        loading.style.display = 'none';
+                        processingDetails.style.display = 'none';
+                        submitBtn.disabled = false;
+
+                        if (data.status === 'success') {
+                            let msg = `Found ${data.count} new leads.`;
+                            if (data.saved) {
+                                msg += ` Saved ${data.saved} to database.`;
+                            }
+                            if (data.skipped_duplicates > 0) {
+                                msg += ` (${data.skipped_duplicates} duplicates skipped)`;
+                            }
+                            document.getElementById('resultCount').textContent = msg;
+                            
+                            // Show skipped items if any
+                            if (data.skipped_items && data.skipped_items.length > 0) {
+                                const skippedList = document.getElementById('skippedList');
+                                skippedList.innerHTML = '';
+                                data.skipped_items.forEach(item => {
+                                    const li = document.createElement('li');
+                                    li.innerHTML = `<strong>${item.reason}:</strong> ${item.url}`;
+                                    skippedList.appendChild(li);
+                                });
+                                document.getElementById('skippedDetails').style.display = 'block';
+                            }
+
+                            data.results.forEach((item, index) => {
+                                const elfsightBadge = item.is_elfsight ? '<span class="badge bg-success">Yes</span>' : '<span class="badge bg-secondary">No</span>';
+                                const verifiedBadge = item.is_verified ? '<span class="badge bg-primary">Verified</span>' : '<span class="badge bg-warning text-dark">Not Verified</span>';
+
+                                const row = `
+                                <tr>
+                                    <td>${index + 1}</td>
+                                    <td>${item.client}</td>
+                                    <td>${item.title} <br><small class="text-muted">${item.snippet.substring(0, 100)}...</small></td>
+                                    <td>${item.city || ''}</td>
+                                    <td>${item.country}</td>
+                                    <td>${item.email || ''}</td>
+                                    <td>${verifiedBadge}</td>
+                                    <td>${item.phone || ''}</td>
+                                    <td>${elfsightBadge}</td>
+                                    <td><a href="${item.link}" class="btn btn-sm btn-outline-primary" target="_blank">View Site</a></td>
+                                </tr>
+                            `;
+                                resultsTableBody.insertAdjacentHTML('beforeend', row);
+                            });
+
+                            resultsArea.style.display = 'block';
+                        } else {
+                            alert('Error: ' + (data.message || 'Unknown error occurred'));
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error:', error);
+                        clearInterval(timerInterval);
+                        clearInterval(progressInterval);
+                        loading.style.display = 'none';
+                        processingDetails.style.display = 'none';
+                        skippedDetails.style.display = 'none';
+                        submitBtn.disabled = false;
+                        alert('An error occurred while scraping: ' + error.message);
+                    });
+            });
         });
 
         document.getElementById('downloadClientBtn').addEventListener('click', function () {
